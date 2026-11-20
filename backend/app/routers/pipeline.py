@@ -14,14 +14,16 @@ from app.services.pipeline_orchestrator import (
     run_forecast_pipeline,
     run_metric_agg_pipeline,
     run_quality_scan,
+    run_timeliness_check,
 )
+from app.services.timeliness import list_observations, record_arrival
 
 router = APIRouter(prefix="/api/pipeline", tags=["数据管道"])
 
 
 @router.post("/run-all", response_model=ActionResult)
 def trigger_all() -> ActionResult:
-    """顺序执行全部 7 条跨模块数据管道。"""
+    """顺序执行全部 8 条跨模块数据管道。"""
     summary = run_all_pipelines()
     return ActionResult(
         ok=True,
@@ -72,6 +74,35 @@ def trigger_experiment_stat(
 def trigger_quality_scan() -> ActionResult:
     result = run_quality_scan()
     return ActionResult(ok=True, message="质量扫描管道已执行", entry=result)
+
+
+@router.post("/timeliness-check", response_model=ActionResult)
+def trigger_timeliness_check(
+    business_day: str | None = Query(default=None, description="目标营业日，如 2026-08-30；缺省取观测数据里最近的营业日"),
+) -> ActionResult:
+    """按各来源应交付营业日校验到达覆盖，产出缺到/已到/未知清单。"""
+    try:
+        result = run_timeliness_check(business_day)
+    except ValueError as exc:
+        return ActionResult(ok=False, message=str(exc))
+    return ActionResult(ok=True, message="时效检查管道已执行", entry=result)
+
+
+@router.get("/timeliness-observations")
+def get_timeliness_observations() -> dict[str, object]:
+    """查询全部时效到达记录，上一营业日的值也可追溯。"""
+    return {"items": list_observations()}
+
+
+@router.post("/timeliness-arrivals", response_model=ActionResult)
+def create_timeliness_arrival(payload: dict[str, object]) -> ActionResult:
+    """补录一条到达记录：必须补到正确的营业日，重复或未来营业日会被拦下。"""
+    entry, error = record_arrival(payload)
+    if error:
+        return ActionResult(ok=False, message=error)
+    # 补录后刷新该营业日的时效检查产物，让报表取到最新结论
+    run_timeliness_check(str(entry["业务日期"]))
+    return ActionResult(ok=True, message="到达记录已补录，时效检查已刷新", entry=entry)
 
 
 @router.post("/attribution-compare", response_model=ActionResult)

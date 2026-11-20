@@ -218,9 +218,10 @@ class TestRunAllPipelines:
             "cube_api",
             "cohort_extract_report",
             "experiment_stat_mart",
+            "timeliness_check",
             "quality_scan",
             "attribution_metric_compare",
         }
         assert set(summary.keys()) == expected_keys
         results = list_pipeline_results()
-        assert len(results) == 7
+        assert len(results) == 8

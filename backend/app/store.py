@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.fixtures import TIMELINESS_OBSERVATIONS
 from app.seed import SEED_ROWS
 
 
@@ -15,6 +16,8 @@ class Store:
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
         self._tables.setdefault("_pipeline_results", [])
+        # 时效观测数据运行期可补录，因此从 fixtures 拷贝成可写表
+        self._tables.setdefault("_timeliness_observations", [dict(row) for row in TIMELINESS_OBSERVATIONS])
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)
@@ -51,6 +54,9 @@ store = Store()
 
 
 def reset_store() -> None:
-    """重新初始化全局 store，用于测试隔离。"""
-    global store
-    store = Store()
+    """重新初始化全局 store，用于测试隔离。
+
+    各模块通过 `from app.store import store` 持有同一个实例，
+    这里必须原地重置而不是重新绑定，否则已导入的引用仍指向旧实例。
+    """
+    store.__init__()

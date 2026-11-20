@@ -1,4 +1,4 @@
-"""跨模块数据管道编排器：实现 7 条真实数据流。
+"""跨模块数据管道编排器：实现 8 条真实数据流。
 
 每条管道都读取上游模块的存储数据或 fixtures，执行真实计算，
 把结果写入 store 的 _pipeline_results 命名空间，供下游消费。
@@ -20,6 +20,7 @@ from app.fixtures import (
     QUALITY_CHECK_SAMPLES,
     TREND_POINTS,
 )
+from app.services.timeliness import evaluate_coverage, latest_observation_day
 from app.store import store
 
 # ---------------------------------------------------------------------------
@@ -342,6 +343,23 @@ def run_experiment_stat_pipeline(experiment_code: str | None = None) -> dict[str
 # Pipeline 6: quality_mon 跨模块扫描
 # ---------------------------------------------------------------------------
 
+def run_timeliness_check(business_day: str | None = None) -> dict[str, Any]:
+    """从已启用的时效性监控规则出发，按各来源应交付营业日校验到达覆盖。
+
+    产物按来源区分缺到、已到与未知，供报表生成取用准时的数据。
+    """
+    if business_day is None:
+        business_day = latest_observation_day() or date.today().isoformat()
+    result = evaluate_coverage(business_day)
+
+    _write_result("timeliness_check", {
+        "source_modules": ["quality_mon"],
+        "target_module": "report_gen",
+        "payload": result,
+    })
+    return result
+
+
 def run_quality_scan() -> dict[str, Any]:
     """扫描 fixtures 质量样本与 store 中各模块数据，生成跨模块质量报告。"""
     samples = list(QUALITY_CHECK_SAMPLES)
@@ -374,6 +392,9 @@ def run_quality_scan() -> dict[str, Any]:
         if abnormal_count:
             module_issues.append({"module": mod, "abnormal_count": abnormal_count})
 
+    # 时效检查：按营业日覆盖区分缺到/已到/未知，补齐扫描原先缺失的时效维度
+    timeliness = run_timeliness_check()
+
     score = max(0, 100 - int(total_anomalies / max(total_rows, 1) * 10000))
     result = {
         "scan_time": datetime.now().isoformat(),
@@ -382,6 +403,9 @@ def run_quality_scan() -> dict[str, Any]:
         "quality_score": score,
         "sample_issues": issues,
         "module_issues": module_issues,
+        "timeliness_checked_day": timeliness["检查营业日"],
+        "timeliness_issues": timeliness["问题清单"],
+        "timeliness_unknown_sources": timeliness["未知来源"],
     }
 
     _write_result("quality_scan", {
@@ -485,13 +509,14 @@ def run_attribution_compare_pipeline(link_code: str | None = None) -> dict[str, 
 # ---------------------------------------------------------------------------
 
 def run_all_pipelines() -> dict[str, Any]:
-    """顺序执行全部 7 条管道并返回摘要。"""
+    """顺序执行全部 8 条管道并返回摘要。"""
     return {
         "metric_agg_api": run_metric_agg_pipeline(),
         "forecast_report": run_forecast_pipeline(),
         "cube_api": run_cube_pipeline(),
         "cohort_extract_report": run_cohort_extract_pipeline(),
         "experiment_stat_mart": run_experiment_stat_pipeline(),
+        "timeliness_check": run_timeliness_check(),
         "quality_scan": run_quality_scan(),
         "attribution_metric_compare": run_attribution_compare_pipeline(),
     }

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.report_builder import build_report_version
 from app.store import store
 
 MODULE = "report_gen"
@@ -62,4 +63,19 @@ class ReportGenService:
         entry["status"] = target
         entry["pending"] = target != STATUS_ORDER[-1]
         entry["abnormal"] = action in NEGATIVE_ACTIONS
-        return entry, f"分析报表已{action}"
+        message = f"分析报表已{action}"
+        if action == "提交生成" and entry.get("报表类型") == "日报":
+            # 日报提交生成时关联时效检查产物，按各来源覆盖选择本期章节
+            version = build_report_version(entry)
+            missing = version["缺失来源"]
+            if missing:
+                message += (
+                    f"；本期业务日 {version['业务日期']}，缺到来源：{'、'.join(missing)}，"
+                    "跨来源合计待数据齐备"
+                )
+            else:
+                message += (
+                    f"；本期业务日 {version['业务日期']}，章节齐备，"
+                    f"合计金额 {version['合计金额']}"
+                )
+        return entry, message

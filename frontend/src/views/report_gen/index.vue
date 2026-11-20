@@ -56,6 +56,35 @@
       </tbody>
     </table>
 
+    <section v-if="versionRows.length" class="version-panel" data-testid="version-panel">
+      <h3>日报生成版本</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>报表编号</th>
+            <th>版本</th>
+            <th>业务日期</th>
+            <th>章节覆盖</th>
+            <th>缺失来源</th>
+            <th>合计金额</th>
+            <th>合计状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="version in versionRows" :key="version.key" :data-testid="`version-${version.key}`">
+            <td>{{ version.报表编号 }}</td>
+            <td>{{ version.版本 }}</td>
+            <td>{{ version.业务日期 }}</td>
+            <td>{{ version.章节摘要 }}</td>
+            <td>{{ version.缺失来源 }}</td>
+            <td>{{ version.合计金额 }}</td>
+            <td>{{ version.合计状态 }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="page-desc">缺到或未知来源的金额保持未知，不记成零；跨来源合计只使用同一营业日的完整数据。</p>
+    </section>
+
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
       <form class="modal" @submit.prevent="submitCreate">
         <h3>登记分析报表</h3>
@@ -86,6 +115,16 @@ import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
 
+type VersionSection = { 章节: string; 状态: string; 金额: number | null }
+type ReportVersion = {
+  版本: string
+  业务日期: string
+  章节: VersionSection[]
+  缺失来源: string[]
+  合计金额: number | null
+  合计状态: string
+}
+
 const ENDPOINT = '/api/report_gen'
 const columns = ["报表编号", "报表类型", "数据范围", "包含图表", "生成周期", "输出格式", "分发渠道", "下次生成"]
 const actions = ["提交生成", "确认分发", "停用报表"]
@@ -105,6 +144,27 @@ const stats = computed(() => [
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
   { label: metricNames[2], value: rows.value.filter((row) => row.status === statuses[statuses.length - 1]).length },
 ])
+
+// 日报每次提交生成都会留下一个版本，这里扁平化展示新旧版本的业务日与金额
+const versionRows = computed(() => {
+  const list: Array<Record<string, string>> = []
+  for (const row of rows.value) {
+    const versions = (row as unknown as { 报告版本?: ReportVersion[] }).报告版本 ?? []
+    for (const version of versions) {
+      list.push({
+        key: `${row.id}-${version.版本}`,
+        报表编号: String(row['报表编号'] ?? ''),
+        版本: version.版本,
+        业务日期: version.业务日期,
+        章节摘要: version.章节.map((section) => `${section.章节}:${section.状态}`).join('，'),
+        缺失来源: version.缺失来源.length ? version.缺失来源.join('、') : '无',
+        合计金额: version.合计金额 === null ? '未知（待数据齐备）' : String(version.合计金额),
+        合计状态: version.合计状态,
+      })
+    }
+  }
+  return list
+})
 
 function resetFilters() {
   filters.value = {}
